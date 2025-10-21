@@ -10,7 +10,13 @@ import 'dotenv/config';
 import { TrackObjectFull } from 'spotify-web-api-node-ts/src/types/SpotifyObjects';
 
 const app = express();
-app.use(cors());
+// 특정 출처(Vercel 프론트엔드)만 허용하도록 cors 설정
+const corsOptions = {
+  origin: 'https://genrefinder.xyz', // 당신의 실제 프론트엔드 도메인
+  optionsSuccessStatus: 200 // 일부 레거시 브라우저를 위한 설정
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
