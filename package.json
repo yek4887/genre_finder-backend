@@ -18,10 +18,12 @@
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "openai": "^6.6.0",
+    "spotify-web-api-node": "^5.0.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   },
   "devDependencies": {
-    "@types/cors": "^2.8.19"
+    "@types/cors": "^2.8.19",
+    "@types/spotify-web-api-node": "^5.0.11"
   }
 }
