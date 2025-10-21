@@ -5,10 +5,9 @@ import OpenAI from 'openai';
 import SpotifyWebApi from 'spotify-web-api-node';
 import 'dotenv/config';
 
-// 💡 Spotify API의 Track 타입을 사용하기 위해 import 경로를 찾습니다.
-// 이 타입은 라이브러리 자체에 내장되어 있습니다.
+// Spotify API의 Track 타입을 사용하기 위해 import
+// @ts-ignore - 라이브러리 타입 정의를 찾지 못할 경우를 대비한 주석
 import { TrackObjectFull } from 'spotify-web-api-node-ts/src/types/SpotifyObjects';
-
 
 const app = express();
 app.use(cors());
@@ -46,9 +45,10 @@ app.post('/api/recommend-genres', async (req, res) => {
     const topTracksResponse = await spotifyApi.getArtistTopTracks(artist.id, 'US');
     const topTracks = topTracksResponse.body.tracks.slice(0, 5);
 
+    // ⭐ 바로 이 부분입니다! t에 타입을 명시해줬습니다.
     const prompt = `
       You are a world-class music curator. A user is searching for an artist named "${artist.name}".
-      Their top tracks are: ${topTracks.map(t => t.name).join(', ')}.
+      Their top tracks are: ${topTracks.map((t: TrackObjectFull) => t.name).join(', ')}.
       Based on this artist's style, recommend 3 unique and interesting music genres.
       For each genre, provide a short, engaging description and 3 other representative artists.
       Do not recommend the genre "${artist.genres.join(', ')}" or the artist "${artist.name}".
@@ -73,7 +73,6 @@ app.post('/api/recommend-genres', async (req, res) => {
       searchedArtist: {
         name: artist.name,
         imageUrl: artist.images[0]?.url,
-        // ⭐ 바로 이 부분입니다! track에 타입을 명시해줬습니다.
         topTracks: topTracks.map((track: TrackObjectFull) => ({
           title: track.name,
           album: track.album.name,
