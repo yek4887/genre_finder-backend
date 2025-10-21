@@ -5,19 +5,24 @@ import OpenAI from 'openai';
 import SpotifyWebApi from 'spotify-web-api-node';
 import 'dotenv/config';
 
-// Spotify API의 Track 타입을 사용하기 위해 import
-// @ts-ignore - 라이브러리 타입 정의를 찾지 못할 경우를 대비한 주석
+// @ts-ignore
 import { TrackObjectFull } from 'spotify-web-api-node-ts/src/types/SpotifyObjects';
 
 const app = express();
-// 특정 출처(Vercel 프론트엔드)만 허용하도록 cors 설정
+
 const corsOptions = {
   origin: 'https://genrefinder.xyz', // 당신의 실제 프론트엔드 도메인
-  optionsSuccessStatus: 200 // 일부 레거시 브라우저를 위한 설정
+  optionsSuccessStatus: 200
 };
-
 app.use(cors(corsOptions));
 app.use(express.json());
+
+// ▼▼▼ 디버깅 코드 시작 ▼▼▼
+console.log("--- [DEBUG] LOADING ENVIRONMENT VARIABLES ---");
+console.log("Spotify Client ID (Loaded Prefix):", process.env.SPOTIFY_CLIENT_ID?.substring(0, 5));
+console.log("Spotify Client Secret (Loaded Prefix):", process.env.SPOTIFY_CLIENT_SECRET?.substring(0, 5));
+console.log("--- [DEBUG] END OF VARIABLES ---");
+// ▲▲▲ 디버깅 코드 끝 ▲▲▲
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -27,6 +32,7 @@ const spotifyApi = new SpotifyWebApi({
 });
 
 const refreshSpotifyToken = async () => {
+  // ... (이하 모든 코드는 이전과 동일합니다) ...
   try {
     const data = await spotifyApi.clientCredentialsGrant();
     spotifyApi.setAccessToken(data.body['access_token']);
@@ -51,7 +57,6 @@ app.post('/api/recommend-genres', async (req, res) => {
     const topTracksResponse = await spotifyApi.getArtistTopTracks(artist.id, 'US');
     const topTracks = topTracksResponse.body.tracks.slice(0, 5);
 
-    // ⭐ 바로 이 부분입니다! t에 타입을 명시해줬습니다.
     const prompt = `
       You are a world-class music curator. A user is searching for an artist named "${artist.name}".
       Their top tracks are: ${topTracks.map((t: TrackObjectFull) => t.name).join(', ')}.
