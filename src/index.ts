@@ -19,15 +19,11 @@ app.use(cors(corsOptions));
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-
-// ▼▼▼ 이 부분만 수정되었습니다 ▼▼▼
 const spotifyApi = new SpotifyWebApi({
   clientId: process.env.SPOTIFY_CLIENT_ID,
   clientSecret: process.env.SPOTIFY_CLIENT_SECRET,
   redirectUri: 'http://127.0.0.1:8080/api/callback' // localhost를 127.0.0.1로 변경
 });
-// ▲▲▲ 이 부분만 수정되었습니다 ▲▲▲
-
 
 app.get('/api/login', (req, res) => {
   const scopes = ['playlist-modify-public', 'playlist-modify-private'];
@@ -126,21 +122,22 @@ app.post('/api/save-playlist', async (req, res) => {
     const userSpotifyApi = new SpotifyWebApi({ accessToken });
 
     try {
-        const me = await userSpotifyApi.getMe();
-        const userId = me.body.id;
-
+        // ▼▼▼ 이 부분이 수정되었습니다 ▼▼▼
         const playlistName = `${artistName} inspired by Genre Finder`;
-        const playlist = await userSpotifyApi.createPlaylist(userId, {
-            name: playlistName,
+
+        // 1. 플레이리스트 생성: 첫 인자로 '이름', 두 번째 인자로 '옵션'을 전달합니다.
+        const playlist = await userSpotifyApi.createPlaylist(playlistName, {
             public: false,
             description: `AI recommended tracks based on ${artistName}. Created by Genre Finder.`
         });
         const playlistId = playlist.body.id;
 
+        // 2. 플레이리스트에 트랙 추가
         const spotifyTrackUris = trackIds.map((id: string) => `spotify:track:${id}`);
         await userSpotifyApi.addTracksToPlaylist(playlistId, spotifyTrackUris);
 
         res.status(200).json({ message: 'Playlist created successfully!', playlistUrl: playlist.body.external_urls.spotify });
+        // ▲▲▲ 이 부분이 수정되었습니다 ▲▲▲
 
     } catch (err) {
         console.error('Failed to create playlist', err);
