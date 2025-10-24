@@ -203,79 +203,95 @@ app.post('/api/recommend-genres', async (req, res) => {
    }
  `;
 
-    let aiGenres: any[] = [];
-    try {
-      console.log(`Sending request to OpenAI for artist: ${artist.name}`);
-      // timeout 옵션은 두 번째 인자(options) 객체 안에 넣습니다.
-      const completion = await openai.chat.completions.create({
-        model: "gpt-3.5-turbo",
-        messages: [{ role: "user", content: prompt }],
-        response_format: { type: "json_object" },
-      }, { timeout: 20000 }); // 20초 타임아웃
+    // server/src/index.ts 파일의 app.post('/api/recommend-genres', ...) 함수 내부
 
+    // ... (AI 응답 파싱까지는 동일) ...
+    let aiGenres: any[] = []; // 기본값 빈 배열 설정 확인
+    try {
       const aiResponse = completion.choices[0].message.content;
-      if (aiResponse) {
-          try {
-              aiGenres = JSON.parse(aiResponse).genres || [];
-              console.log(`Received AI genres for ${artist.name}`);
-          } catch (parseError) {
-                console.error("Failed to parse AI response JSON:", parseError, "Response was:", aiResponse);
-           }
-      } else {
-            console.warn(`OpenAI returned empty content for ${artist.name}`);
-       }
-    } catch (openaiError: any) {
-        console.error(`Error calling OpenAI for ${artist.name}:`, openaiError.message || openaiError);
-        if (openaiError.response) console.error("OpenAI Error Response:", openaiError.response.data);
-     }
+      aiGenres = aiResponse ? JSON.parse(aiResponse).genres : [];
+    } catch (e) {
+      console.error("Failed to parse AI response:", e);
+      aiGenres = []; // 파싱 실패 시 빈 배열 보장
+    }
 
-    let enrichedGenres: any[] = [];
+    // --- 대표 아티스트 이미지 조회 로직 시작 (로그 강화) ---
+    console.log("AI Genres before image fetch:", JSON.stringify(aiGenres, null, 2));
+
+    let enrichedGenres: any[] = []; // 결과 배열 초기화
     try {
-        console.log(`Fetching images for AI recommended artists...`);
         enrichedGenres = await Promise.all(
-          (aiGenres || []).map(async (genre: any) => {
+          (aiGenres || []).map(async (genre: any, index: number) => {
+            // genre 객체 유효성 검사 추가
+            if (!genre || typeof genre !== 'object') {
+                console.warn(`Invalid genre object found at index ${index}. Skipping.`);
+                return null; // 유효하지 않으면 null 반환 (나중에 필터링)
+            }
+
             let imageUrl: string | null = null;
+            const firstArtist = genre.artists?.[0]; // 첫 번째 아티스트 정보
+
             try {
-              if (genre && genre.artists && genre.artists.length > 0 && genre.artists[0].artistName) {
-                // 주의: Access Token이 설정된 userSpotifyApi 사용
-                const artistSearch = await userSpotifyApi.searchArtists(genre.artists[0].artistName, { limit: 1 });
+              if (firstArtist && firstArtist.artistName) {
+                console.log(`[Image Fetch ${index+1}/${aiGenres.length}] Searching for: ${firstArtist.artistName}`);
+                const artistSearch = await userSpotifyApi.searchArtists(firstArtist.artistName, { limit: 1 });
                 if (artistSearch.body.artists && artistSearch.body.artists.items.length > 0) {
                   imageUrl = artistSearch.body.artists.items[0].images[0]?.url || null;
+                  console.log(`[Image Fetch ${index+1}] Found image for ${firstArtist.artistName}: ${imageUrl ? 'Yes' : 'No'}`);
+                } else {
+                    console.log(`[Image Fetch ${index+1}] Artist not found on Spotify: ${firstArtist.artistName}`);
                 }
+              } else {
+                  console.warn(`[Image Fetch ${index+1}] No valid artist info found for genre: ${genre.name}`);
               }
             } catch (imageError: any) {
-                console.error(`Failed to fetch image for ${genre.artists[0]?.artistName}:`, imageError.message || imageError);
-                 if(imageError.body) console.error('Spotify Image Search Error Body:', imageError.body);
-                 // 개별 이미지 오류는 무시하고 계속 진행
+                // 개별 이미지 조회 실패 로깅
+                console.error(`[Image Fetch ${index+1}] FAILED for ${firstArtist?.artistName}:`, imageError.message || imageError);
             }
+            // 원래 genre 객체와 imageUrl을 합쳐 반환
             return { ...genre, imageUrl };
           })
         );
-         console.log(`Finished fetching images.`);
-     }
-    catch (enrichError) {
-        // Promise.all 자체에서 발생할 수 있는 예외 처리 (거의 발생 안 함)
-        console.error("Unexpected error during genre enrichment (image fetching):", enrichError);
-        enrichedGenres = aiGenres; // 이미지 조회가 실패하면 원본 AI 결과 사용
-     }
 
+        // map 결과에서 null 값 제거
+        enrichedGenres = enrichedGenres.filter(g => g !== null);
+
+        console.log(`Finished fetching images successfully for ${enrichedGenres.length} genres.`); // 성공 로그 위치 변경
+
+    } catch (enrichError) {
+        // Promise.all 전체가 실패하는 경우 (거의 발생 안 함)
+        console.error("CRITICAL Error during Promise.all for image fetching:", enrichError);
+        // 이 경우, 이미지 없이 원래 AI 결과라도 사용하도록 fallback
+        enrichedGenres = aiGenres.map((g: any) => ({ ...g, imageUrl: null }));
+    }
+
+    // --- 로그 출력 부분 수정 (JSON.stringify 오류 방지) ---
+    try {
+        // 순환 참조 등이 발생할 수 있으므로 안전하게 로깅 시도
+        console.log("Enriched Genres after image fetch (first item):", JSON.stringify(enrichedGenres[0], null, 2));
+        console.log(`Total enriched genres count: ${enrichedGenres.length}`);
+    } catch (stringifyError) {
+        console.error("Could not stringify enrichedGenres:", stringifyError);
+        console.log("Raw enrichedGenres (first item):", enrichedGenres[0]); // Raw 객체 출력 시도
+    }
+    // --- 로그 출력 부분 수정 끝 ---
+
+
+    // 최종 응답 데이터 구성
     const responseData = {
-        searchedArtist: { name: artist.name, imageUrl: artist.images[0]?.url },
-        topTracks: topTracks,
-        aiRecommendations: enrichedGenres,
-     };
-    console.log(`Successfully processed recommend-genres request for query: ${query}`);
+      searchedArtist: { name: artist.name, imageUrl: artist.images[0]?.url },
+      topTracks: topTracks,
+      aiRecommendations: enrichedGenres, // 최종 결과 사용
+    };
+
+    console.log(`Successfully prepared response for query: ${query}`); // 최종 성공 로그
     res.json(responseData);
 
   } catch (error: any) {
      // 핸들러 내에서 예상치 못한 모든 오류 처리
-    console.error(`Unhandled error in recommend-genres for query ${query}:`, error.message || error);
+    console.error(`Unhandled fatal error in recommend-genres for query ${query}:`, error.message || error);
     if(error.body) console.error('Spotify General Error Body:', error.body);
-    // 401 오류는 토큰 만료 가능성
-    if (error.statusCode === 401) {
-        return res.status(401).json({ error: 'Spotify access token might be expired. Please try refreshing.' });
-    }
-    res.status(error.statusCode || 500).json({ error: `An unexpected error occurred: ${error.body?.error?.message || error.message}` });
+    res.status(error.statusCode || 500).json({ error: `An unexpected server error occurred.` }); // 사용자에게 간결한 메시지
   }
 });
 
