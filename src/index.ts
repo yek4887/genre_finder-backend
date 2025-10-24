@@ -197,14 +197,43 @@ app.post('/api/recommend-genres', async (req, res) => {
     const existingGenres = (artist.genres && artist.genres.length > 0)
       ? `Do not recommend the genre "${artist.genres.join(', ')}".`
       : '';
+    // server/src/index.ts 파일에서 prompt 부분을 찾아 아래 내용으로 교체
+
     const prompt = `
-      You are a world-class music curator... (이하 프롬프트 동일, 국가 표시 제거 및 6명 요청 포함)
-      IMPORTANT: Do NOT include country indicators like (US), (UK), (KR) next to the artist names. Just list the names.
-      Provide the response strictly in JSON format like this, including spotifyTrackIds for each recommended artist's top track:
+      You are a world-class music curator with deep knowledge of music from various countries.
+      A user is searching for music related to "${artist.name}".
+      Based on this artist's style:
+      1. Recommend EXACTLY 3 unique and interesting music genres. No more, no less.
+      2. For EACH of these 3 genres, provide a short, engaging description AND list EXACTLY 6 representative artists if possible. Listing 6 artists per genre is a primary requirement.
+      ${existingGenres}
+      Do not recommend the artist "${artist.name}".
+      Try to include a diverse mix of artists from different countries like Korea, Japan, the UK, or the US, if relevant.
+      IMPORTANT: Do NOT include country indicators like (US), (UK), (KR) next to the artist names.
+      Provide the response strictly in JSON format like this, ensuring the top-level "genres" array contains EXACTLY 3 items, and EACH 'artists' array ideally contains 6 items:
       {
-        "genres": [
-          { "name": "...", "description": "...", "artists": [{"artistName": "...", "spotifyTrackId": "..."}, ...] },
-          ...
+        "genres": [ // MUST contain EXACTLY 3 genre objects
+          {
+            "name": "Genre Name 1",
+            "description": "...",
+            "artists": [ // MUST contain 6 artists if possible
+              {"artistName": "Artist 1", "spotifyTrackId": "..."},
+              {"artistName": "Artist 2", "spotifyTrackId": "..."},
+              {"artistName": "Artist 3", "spotifyTrackId": "..."},
+              {"artistName": "Artist 4", "spotifyTrackId": "..."},
+              {"artistName": "Artist 5", "spotifyTrackId": "..."},
+              {"artistName": "Artist 6", "spotifyTrackId": "..."}
+            ]
+          },
+          {
+            "name": "Genre Name 2",
+            "description": "...",
+            "artists": [ /* 6 artists */ ]
+          },
+          {
+            "name": "Genre Name 3",
+            "description": "...",
+            "artists": [ /* 6 artists */ ]
+          }
         ]
       }
     `;
