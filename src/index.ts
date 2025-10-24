@@ -91,7 +91,7 @@ app.post('/api/recommend-genres', async (req, res) => {
     if (!artist) {
       return res.status(404).json({ error: 'Artist or Track not found' });
     }
-    
+ 
     const prompt = `
       You are a world-class music curator. A user is searching for an artist named "${artist.name}".
       Based on this artist's style, recommend 3 unique and interesting music genres.
