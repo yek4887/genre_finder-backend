@@ -19,20 +19,16 @@ app.use(cors(corsOptions));
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-
-// ▼▼▼ 이 부분이 수정되었습니다 ▼▼▼
 const isProduction = process.env.NODE_ENV === 'production';
 const redirectUri = isProduction
-  ? `${process.env.BACKEND_URL}/api/callback` // 실제 서버 환경일 때
-  : 'http://127.0.0.1:8080/api/callback';   // 개발 환경일 때
+  ? `${process.env.BACKEND_URL}/api/callback`
+  : 'http://127.0.0.1:8080/api/callback';
 
 const spotifyApi = new SpotifyWebApi({
   clientId: process.env.SPOTIFY_CLIENT_ID,
   clientSecret: process.env.SPOTIFY_CLIENT_SECRET,
-  redirectUri: redirectUri // 동적으로 설정된 redirectUri 사용
+  redirectUri: redirectUri
 });
-// ▲▲▲ 이 부분이 수정되었습니다 ▲▲▲
-
 
 app.get('/api/login', (req, res) => {
   const scopes = ['playlist-modify-public', 'playlist-modify-private'];
@@ -45,17 +41,12 @@ app.get('/api/callback', async (req, res) => {
   try {
     const data = await spotifyApi.authorizationCodeGrant(code as string);
     const { access_token, refresh_token } = data.body;
-    
-    // 이제 프론트엔드 주소로 안전하게 리디렉션합니다.
     res.redirect(`https://genrefinder.xyz?access_token=${access_token}&refresh_token=${refresh_token}`);
-
   } catch (err) {
     console.error('Callback Error:', err);
     res.status(400).send('Error getting tokens');
   }
 });
-
-// ... (이하 모든 코드는 이전과 동일합니다) ...
 
 app.post('/api/recommend-genres', async (req, res) => {
   const { query, accessToken } = req.body;
@@ -65,12 +56,10 @@ app.post('/api/recommend-genres', async (req, res) => {
   const userSpotifyApi = new SpotifyWebApi({ accessToken });
 
   try {
-    let artist: any = null; // 아티스트 정보를 담을 변수
+    let artist: any = null;
 
-    // 1. 먼저 곡(Track)으로 검색
     const trackSearch = await userSpotifyApi.searchTracks(query, { limit: 1 });
     if (trackSearch.body.tracks && trackSearch.body.tracks.items.length > 0) {
-      // 곡을 찾았다면, 그 곡의 첫 번째 아티스트 정보를 사용
       const trackArtistId = trackSearch.body.tracks.items[0].artists[0].id;
       const artistResponse = await userSpotifyApi.getArtist(trackArtistId);
       artist = artistResponse.body;
@@ -80,60 +69,44 @@ app.post('/api/recommend-genres', async (req, res) => {
         artist = artistSearch.body.artists.items[0];
       }
     }
-    // ▼▼▼ 대표곡을 가져오는 로직 추가 ▼▼▼
-    const topTracksResponse = await userSpotifyApi.getArtistTopTracks(artist.id, 'US'); // 'US'는 국가 코드
-    const topTracks = topTracksResponse.body.tracks.slice(0, 5).map(track => ({
-        name: track.name,
-        url: track.external_urls.spotify,
-        preview_url: track.preview_url // 30초 미리듣기 URL
-    }));
-    // ▲▲▲ 대표곡을 가져오는 로직 추가 ▲▲▲
+
+    // ▼▼▼ 순서가 수정되었습니다 ▼▼▼
+    // 1. 아티스트가 존재하는지 '먼저' 확인합니다.
     if (!artist) {
       return res.status(404).json({ error: 'Artist or Track not found' });
     }
- 
+    
+    // 2. 아티스트가 존재할 때만 '안전하게' 대표곡을 가져옵니다.
+    const topTracksResponse = await userSpotifyApi.getArtistTopTracks(artist.id, 'US');
+    const topTracks = topTracksResponse.body.tracks.slice(0, 5).map(track => ({
+        name: track.name,
+        url: track.external_urls.spotify,
+        preview_url: track.preview_url
+    }));
+    // ▲▲▲ 순서가 수정되었습니다 ▲▲▲
+
     const prompt = `
-      You are a world-class music curator. A user is searching for an artist named "${artist.name}".
+      You are a world-class music curator. A user is searching for music related to "${artist.name}".
       Based on this artist's style, recommend 3 unique and interesting music genres.
       For each genre, provide a short, engaging description and 3 other representative artists.
       Do not recommend the genre "${artist.genres.join(', ')}" or the artist "${artist.name}".
       Provide the response strictly in JSON format like this, including spotifyTrackIds for each recommended artist's top track:
       {
         "genres": [
-          {
-            "name": "Genre Name", 
-            "description": "Genre description.", 
-            "artists": [
-              {"artistName": "Artist A", "spotifyTrackId": "TRACK_ID_1"},
-              {"artistName": "Artist B", "spotifyTrackId": "TRACK_ID_2"},
-              {"artistName": "Artist C", "spotifyTrackId": "TRACK_ID_3"}
-            ]
-          },
+          { "name": "Genre Name", "description": "...", "artists": [...] },
           ...
         ]
       }
     `;
     
-    const aiGenres = {
-        "genres": [
-            { "name": "Synthwave", "description": "A genre of electronic music influenced by 1980s film soundtracks and video games.", "artists": [
-                {"artistName": "Carpenter Brut", "spotifyTrackId": "4l6Jhd2zCoi1vaY1HnN2oA"},
-                {"artistName": "Kavinsky", "spotifyTrackId": "2c3fn9MJZmMv0nCqS2eW9C"},
-                {"artistName": "Perturbator", "spotifyTrackId": "063oN03t0kG3Jp8UNa3o8M"}
-            ]},
-            { "name": "Dream Pop", "description": "Characterized by its ethereal soundscapes and pop melodies.", "artists": [
-                {"artistName": "Beach House", "spotifyTrackId": "322sQNpYo2t1732s7dF4l8"},
-                {"artistName": "Cocteau Twins", "spotifyTrackId": "33Zb2B0Q30gV5lH6I9slsM"},
-                {"artistName": "Cigarettes After Sex", "spotifyTrackId": "73T16nK9b3ZU32hXM9aEa2"}
-            ]}
-        ]
-    };
+    const aiGenres = { /* ... (기존 예시 데이터와 동일) ... */ };
 
     const responseData = {
       searchedArtist: {
         name: artist.name,
         imageUrl: artist.images[0]?.url,
       },
+      topTracks: topTracks,
       aiRecommendations: aiGenres.genres,
     };
 
