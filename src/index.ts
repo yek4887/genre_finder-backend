@@ -120,19 +120,27 @@ app.post('/api/recommend-genres', async (req, res) => {
       aiGenres = [];
     }
 
-    // 대표 아티스트 이미지 조회 로직
+    // ▼▼▼ 이 부분이 수정되었습니다 (더 안전한 로직으로 교체) ▼▼▼
+    // --- 대표 아티스트 이미지 조회 로직 시작 ---
     const enrichedGenres = await Promise.all(
-      aiGenres.map(async (genre: any) => {
+      (aiGenres || []).map(async (genre: any) => {
         let imageUrl = '';
-        if (genre.artists && genre.artists.length > 0) {
-          const artistSearch = await userSpotifyApi.searchArtists(genre.artists[0].artistName, { limit: 1 });
-          if (artistSearch.body.artists && artistSearch.body.artists.items.length > 0) {
-            imageUrl = artistSearch.body.artists.items[0].images[0]?.url;
+        try { // 개별 이미지 조회 실패가 전체를 중단시키지 않도록 try-catch 추가
+          if (genre.artists && genre.artists.length > 0) {
+            const artistSearch = await userSpotifyApi.searchArtists(genre.artists[0].artistName, { limit: 1 });
+            if (artistSearch.body.artists && artistSearch.body.artists.items.length > 0) {
+              imageUrl = artistSearch.body.artists.items[0].images[0]?.url || '';
+            }
           }
+        } catch (error) {
+            console.error(`Failed to fetch image for ${genre.artists[0]?.artistName}:`, error);
+            // 이미지를 못찾아도 괜찮음, imageUrl은 ''로 유지됨
         }
         return { ...genre, imageUrl };
       })
     );
+    // --- 대표 아티스트 이미지 조회 로직 끝 ---
+    // ▲▲▲ 이 부분이 수정되었습니다 (더 안전한 로직으로 교체) ▲▲▲
 
     const responseData = {
       searchedArtist: {
