@@ -195,6 +195,9 @@ app.post('/api/save-playlist', async (req, res) => {
     const userSpotifyApi = new SpotifyWebApi({ accessToken });
 
     try {
+      // 1. 현재 로그인된 사용자의 프로필 정보 가져오기
+        const meResponse = await userSpotifyApi.getMe();
+        const userId = meResponse.body.id; // 사용자의 Spotify ID
         // 플레이리스트 이름 생성
         const playlistName = `${artistName} inspired by Genre Finder`;
         // 플레이리스트 생성 요청
