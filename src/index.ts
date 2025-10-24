@@ -76,11 +76,18 @@ app.post('/api/recommend-genres', async (req, res) => {
       artist = artistResponse.body;
     } else {
       const artistSearch = await userSpotifyApi.searchArtists(query, { limit: 1 });
-      if (!artistSearch.body.artists || artistSearch.body.artists.items.length === 0) {
-        return res.status(404).json({ error: 'Artist not found' });
+      if (artistSearch.body.artists && artistSearch.body.artists.items.length > 0) {
+        artist = artistSearch.body.artists.items[0];
       }
-      artist = artistSearch.body.artists.items[0];
     }
+    // ▼▼▼ 대표곡을 가져오는 로직 추가 ▼▼▼
+    const topTracksResponse = await userSpotifyApi.getArtistTopTracks(artist.id, 'US'); // 'US'는 국가 코드
+    const topTracks = topTracksResponse.body.tracks.slice(0, 5).map(track => ({
+        name: track.name,
+        url: track.external_urls.spotify,
+        preview_url: track.preview_url // 30초 미리듣기 URL
+    }));
+    // ▲▲▲ 대표곡을 가져오는 로직 추가 ▲▲▲
     if (!artist) {
       return res.status(404).json({ error: 'Artist or Track not found' });
     }
