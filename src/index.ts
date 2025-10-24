@@ -39,16 +39,19 @@ const spotifyApi = new SpotifyWebApi({
 });
 
 // 로그인 라우트
+// 로그인 라우트 (수정된 부분)
 app.get('/api/login', (req, res) => {
-  const scopes = ['playlist-modify-public', 'playlist-modify-private', 'user-read-private']; // getMe를 위해 user-read-private 추가
-  // 로그인 요청 시 환경에 맞는 Redirect URI 생성
-  const redirectUriFull = isProduction
-    ? `${process.env.BACKEND_URL}${baseRedirectUri}`
-    : `http://127.0.0.1:8080${baseRedirectUri}`;
-  const authorizeURL = spotifyApi.createAuthorizeURL(scopes, 'state-key', true, { redirect_uri: redirectUriFull });
+  const scopes = ['playlist-modify-public', 'playlist-modify-private', 'user-read-private'];
+  const state = 'state-key'; // CSRF 방지를 위한 상태값 (실제 앱에서는 랜덤 생성 권장)
+  const showDialog = true; // 항상 사용자에게 권한 동의를 묻도록 설정
+
+  // createAuthorizeURL은 redirect_uri를 직접 인자로 받지 않습니다.
+  // scopes, state, showDialog 만 전달합니다.
+  const authorizeURL = spotifyApi.createAuthorizeURL(scopes, state, showDialog);
+
+  console.log("Redirecting to Spotify:", authorizeURL); // 디버깅 로그
   res.redirect(authorizeURL);
 });
-
 // 콜백 라우트
 app.get('/api/callback', async (req, res) => {
   const { code } = req.query;
