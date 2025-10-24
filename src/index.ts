@@ -244,11 +244,13 @@ app.post('/api/recommend-genres', async (req, res) => {
 
     try {
       console.log(`Sending request to OpenAI for artist: ${artist.name}`);
-      completion = await openai.chat.completions.create({ // 할당
-        model: "gpt-3.5-turbo",
+      completion = await openai.chat.completions.create({
+        // ▼▼▼ 이 부분을 수정하세요 ▼▼▼
+        model: "gpt-4o", // 모델 이름을 gpt-4o로 변경
+        // ▲▲▲ 이 부분을 수정하세요 ▲▲▲
         messages: [{ role: "user", content: prompt }],
         response_format: { type: "json_object" },
-      }, { timeout: 20000 }); // timeout 옵션 올바른 위치
+      }, { timeout: 30000 }); // GPT-4o는 응답이 조금 더 느릴 수 있으므로 타임아웃을 30초로 늘립니다.
 
       const aiResponse = completion?.choices[0]?.message?.content; // ?. 사용
       if (aiResponse) {
