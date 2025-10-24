@@ -70,26 +70,29 @@ app.post('/api/recommend-genres', async (req, res) => {
       }
     }
 
-    // ▼▼▼ 순서가 수정되었습니다 ▼▼▼
-    // 1. 아티스트가 존재하는지 '먼저' 확인합니다.
     if (!artist) {
       return res.status(404).json({ error: 'Artist or Track not found' });
     }
     
-    // 2. 아티스트가 존재할 때만 '안전하게' 대표곡을 가져옵니다.
     const topTracksResponse = await userSpotifyApi.getArtistTopTracks(artist.id, 'US');
     const topTracks = topTracksResponse.body.tracks.slice(0, 5).map(track => ({
         name: track.name,
         url: track.external_urls.spotify,
         preview_url: track.preview_url
     }));
-    // ▲▲▲ 순서가 수정되었습니다 ▲▲▲
+
+    // ▼▼▼ 이 부분이 수정되었습니다 ▼▼▼
+    // artist.genres가 존재하고 비어있지 않은지 확인합니다.
+    const existingGenres = (artist.genres && artist.genres.length > 0)
+      ? `Do not recommend the genre "${artist.genres.join(', ')}".`
+      : ''; // 장르 정보가 없으면 이 문장은 아예 포함하지 않습니다.
 
     const prompt = `
       You are a world-class music curator. A user is searching for music related to "${artist.name}".
       Based on this artist's style, recommend 3 unique and interesting music genres.
       For each genre, provide a short, engaging description and 3 other representative artists.
-      Do not recommend the genre "${artist.genres.join(', ')}" or the artist "${artist.name}".
+      ${existingGenres}
+      Do not recommend the artist "${artist.name}".
       Provide the response strictly in JSON format like this, including spotifyTrackIds for each recommended artist's top track:
       {
         "genres": [
@@ -98,54 +101,15 @@ app.post('/api/recommend-genres', async (req, res) => {
         ]
       }
     `;
+    // ▲▲▲ 이 부분이 수정되었습니다 ▲▲▲
     
-    const aiGenres = { /* ... (기존 예시 데이터와 동일) ... */ };
-
-    const responseData = {
-      searchedArtist: {
-        name: artist.name,
-        imageUrl: artist.images[0]?.url,
-      },
-      topTracks: topTracks,
-      aiRecommendations: aiGenres.genres,
-    };
-
-    res.json(responseData);
-
-  } catch (error) {
-    console.error('Error processing request:', error);
-    res.status(500).json({ error: 'Failed to process request.' });
-  }
-});
-
-app.post('/api/save-playlist', async (req, res) => {
-    const { accessToken, trackIds, artistName } = req.body;
-    if (!accessToken || !trackIds || !artistName) {
-        return res.status(400).json({ error: 'Missing required parameters.' });
-    }
-
-    const userSpotifyApi = new SpotifyWebApi({ accessToken });
-
-    try {
-        const playlistName = `${artistName} inspired by Genre Finder`;
-        const playlist = await userSpotifyApi.createPlaylist(playlistName, {
-            public: false,
-            description: `AI recommended tracks based on ${artistName}. Created by Genre Finder.`
-        });
-        const playlistId = playlist.body.id;
-
-        const spotifyTrackUris = trackIds.map((id: string) => `spotify:track:${id}`);
-        await userSpotifyApi.addTracksToPlaylist(playlistId, spotifyTrackUris);
-
-        res.status(200).json({ message: 'Playlist created successfully!', playlistUrl: playlist.body.external_urls.spotify });
-
-    } catch (err) {
-        console.error('Failed to create playlist', err);
-        res.status(500).json({ error: 'Failed to create playlist.' });
-    }
-});
-
-const PORT = 8080;
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+    // (이 부분은 실제 OpenAI 호출 로직으로 대체될 수 있습니다)
+    const aiGenres = {
+        "genres": [
+            { "name": "Synthwave", "description": "A genre of electronic music influenced by 1980s film soundtracks and video games.", "artists": [
+                {"artistName": "Carpenter Brut", "spotifyTrackId": "4l6Jhd2zCoi1vaY1HnN2oA"},
+                {"artistName": "Kavinsky", "spotifyTrackId": "2c3fn9MJZmMv0nCqS2eW9C"},
+                {"artistName": "Perturbator", "spotifyTrackId": "063oN03t0kG3Jp8UNa3o8M"}
+            ]},
+            { "name": "Dream Pop", "description": "Characterized by its ethereal soundscapes and pop melodies.", "artists": [
+                {"artistName": "Beach House",
