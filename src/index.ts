@@ -9,13 +9,16 @@ import 'dotenv/config';
 import { TrackObjectFull } from 'spotify-web-api-node-ts/src/types/SpotifyObjects';
 
 const app = express();
-app.use(express.json());
 
 const corsOptions = {
   origin: 'https://genrefinder.xyz',
   optionsSuccessStatus: 200
 };
-app.use(cors(corsOptions));
+
+// ▼▼▼ 이 부분의 순서가 수정되었습니다 ▼▼▼
+app.use(cors(corsOptions)); // CORS 미들웨어를 가장 먼저 적용
+app.use(express.json());   // 그 다음에 JSON 파싱 미들웨어 적용
+// ▲▲▲ 이 부분의 순서가 수정되었습니다 ▲▲▲
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -29,6 +32,8 @@ const spotifyApi = new SpotifyWebApi({
   clientSecret: process.env.SPOTIFY_CLIENT_SECRET,
   redirectUri: redirectUri
 });
+
+// ... (이하 모든 API 라우트 코드는 이전과 동일합니다) ...
 
 app.get('/api/login', (req, res) => {
   const scopes = ['playlist-modify-public', 'playlist-modify-private'];
@@ -70,12 +75,10 @@ app.post('/api/recommend-genres', async (req, res) => {
       }
     }
 
-    // 1. 아티스트가 존재하는지 '먼저' 확인합니다.
     if (!artist) {
       return res.status(404).json({ error: 'Artist or Track not found' });
     }
     
-    // 2. 아티스트가 존재할 때만 '안전하게' 대표곡을 가져옵니다.
     const topTracksResponse = await userSpotifyApi.getArtistTopTracks(artist.id, 'US');
     const topTracks = topTracksResponse.body.tracks.slice(0, 5).map(track => ({
         name: track.name,
@@ -83,7 +86,6 @@ app.post('/api/recommend-genres', async (req, res) => {
         preview_url: track.preview_url
     }));
 
-    // artist.genres가 존재하는지 안전하게 확인합니다.
     const existingGenres = (artist.genres && artist.genres.length > 0)
       ? `Do not recommend the genre "${artist.genres.join(', ')}".`
       : '';
@@ -103,7 +105,6 @@ app.post('/api/recommend-genres', async (req, res) => {
       }
     `;
     
-    // --- 진짜 OpenAI API 호출 시작 ---
     const completion = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
       messages: [{ role: "user", content: prompt }],
@@ -120,9 +121,8 @@ app.post('/api/recommend-genres', async (req, res) => {
       }
     } catch (e) {
       console.error("Failed to parse AI response:", e);
-      aiGenres = []; // 파싱 실패 시 안전하게 빈 배열로 처리
+      aiGenres = [];
     }
-    // --- 진짜 OpenAI API 호출 끝 ---
 
     const responseData = {
       searchedArtist: {
