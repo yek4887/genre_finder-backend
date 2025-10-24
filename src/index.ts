@@ -200,22 +200,25 @@ app.post('/api/recommend-genres', async (req, res) => {
     // server/src/index.ts 파일에서 prompt 부분을 찾아 아래 내용으로 교체
 
     const prompt = `
-      You are a world-class music curator with deep knowledge of music from various countries.
+      You are a world-class music curator with extensive knowledge of global music scenes, including K-Pop, J-Pop, Western Pop/Rock, and more.
       A user is searching for music related to "${artist.name}".
       Based on this artist's style:
       1. Recommend EXACTLY 3 unique and interesting music genres. No more, no less.
-      2. For EACH of these 3 genres, provide a short, engaging description AND list EXACTLY 6 representative artists if possible. Listing 6 artists per genre is a primary requirement.
+      2. For EACH of these 3 genres, provide a short, engaging description AND list EXACTLY 6 representative artists if possible. Listing 6 artists per genre is crucial.
       ${existingGenres}
       Do not recommend the artist "${artist.name}".
-      Try to include a diverse mix of artists from different countries like Korea, Japan, the UK, or the US, if relevant.
+
+      **Cultural Diversity Requirement:** When listing representative artists for each genre, make a conscious effort to include artists from various geographical and cultural backgrounds IF the genre naturally spans across them. For example, if recommending "Indie Pop", try to include relevant artists from Korea, Japan, UK, US, or other regions known for that style, not just Western artists. Aim for a balanced and globally representative selection where appropriate for the genre.
+
       IMPORTANT: Do NOT include country indicators like (US), (UK), (KR) next to the artist names.
-      Provide the response strictly in JSON format like this, ensuring the top-level "genres" array contains EXACTLY 3 items, and EACH 'artists' array ideally contains 6 items:
+
+      Provide the response strictly in JSON format like this, ensuring the top-level "genres" array contains EXACTLY 3 items, and EACH 'artists' array ideally contains 6 items reflecting cultural diversity if applicable:
       {
-        "genres": [ // MUST contain EXACTLY 3 genre objects
+        "genres": [
           {
             "name": "Genre Name 1",
             "description": "...",
-            "artists": [ // MUST contain 6 artists if possible
+            "artists": [ // MUST contain 6 diverse artists if possible
               {"artistName": "Artist 1", "spotifyTrackId": "..."},
               {"artistName": "Artist 2", "spotifyTrackId": "..."},
               {"artistName": "Artist 3", "spotifyTrackId": "..."},
@@ -224,19 +227,11 @@ app.post('/api/recommend-genres', async (req, res) => {
               {"artistName": "Artist 6", "spotifyTrackId": "..."}
             ]
           },
-          {
-            "name": "Genre Name 2",
-            "description": "...",
-            "artists": [ /* 6 artists */ ]
-          },
-          {
-            "name": "Genre Name 3",
-            "description": "...",
-            "artists": [ /* 6 artists */ ]
-          }
+          // ... (Exactly 2 more genre objects) ...
         ]
       }
     `;
+    // ▲▲▲ 프롬프트 수정 끝 ▲▲▲
 
     // OpenAI API 호출
     let aiGenres: any[] = [];
