@@ -70,10 +70,12 @@ app.post('/api/recommend-genres', async (req, res) => {
       }
     }
 
+    // 1. 아티스트가 존재하는지 '먼저' 확인합니다.
     if (!artist) {
       return res.status(404).json({ error: 'Artist or Track not found' });
     }
     
+    // 2. 아티스트가 존재할 때만 '안전하게' 대표곡을 가져옵니다.
     const topTracksResponse = await userSpotifyApi.getArtistTopTracks(artist.id, 'US');
     const topTracks = topTracksResponse.body.tracks.slice(0, 5).map(track => ({
         name: track.name,
@@ -81,11 +83,10 @@ app.post('/api/recommend-genres', async (req, res) => {
         preview_url: track.preview_url
     }));
 
-    // ▼▼▼ 이 부분이 수정되었습니다 ▼▼▼
-    // artist.genres가 존재하고 비어있지 않은지 확인합니다.
+    // artist.genres가 존재하는지 안전하게 확인합니다.
     const existingGenres = (artist.genres && artist.genres.length > 0)
       ? `Do not recommend the genre "${artist.genres.join(', ')}".`
-      : ''; // 장르 정보가 없으면 이 문장은 아예 포함하지 않습니다.
+      : '';
 
     const prompt = `
       You are a world-class music curator. A user is searching for music related to "${artist.name}".
@@ -101,23 +102,27 @@ app.post('/api/recommend-genres', async (req, res) => {
         ]
       }
     `;
-    // ▲▲▲ 이 부분이 수정되었습니다 ▲▲▲
     
-    // (이 부분은 실제 OpenAI 호출 로직으로 대체될 수 있습니다)
-    const aiGenres = {
-        "genres": [
-            { "name": "Synthwave", "description": "A genre of electronic music influenced by 1980s film soundtracks and video games.", "artists": [
-                {"artistName": "Carpenter Brut", "spotifyTrackId": "4l6Jhd2zCoi1vaY1HnN2oA"},
-                {"artistName": "Kavinsky", "spotifyTrackId": "2c3fn9MJZmMv0nCqS2eW9C"},
-                {"artistName": "Perturbator", "spotifyTrackId": "063oN03t0kG3Jp8UNa3o8M"}
-            ]},
-            { "name": "Dream Pop", "description": "Characterized by its ethereal soundscapes and pop melodies.", "artists": [
-                {"artistName": "Beach House", "spotifyTrackId": "322sQNpYo2t1732s7dF4l8"},
-                {"artistName": "Cocteau Twins", "spotifyTrackId": "33Zb2B0Q30gV5lH6I9slsM"},
-                {"artistName": "Cigarettes After Sex", "spotifyTrackId": "73T16nK9b3ZU32hXM9aEa2"}
-            ]}
-        ]
-    };
+    // --- 진짜 OpenAI API 호출 시작 ---
+    const completion = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages: [{ role: "user", content: prompt }],
+      response_format: { type: "json_object" },
+    });
+
+    let aiGenres;
+    try {
+      const aiResponse = completion.choices[0].message.content;
+      if (aiResponse) {
+        aiGenres = JSON.parse(aiResponse).genres;
+      } else {
+        aiGenres = [];
+      }
+    } catch (e) {
+      console.error("Failed to parse AI response:", e);
+      aiGenres = []; // 파싱 실패 시 안전하게 빈 배열로 처리
+    }
+    // --- 진짜 OpenAI API 호출 끝 ---
 
     const responseData = {
       searchedArtist: {
@@ -125,7 +130,7 @@ app.post('/api/recommend-genres', async (req, res) => {
         imageUrl: artist.images[0]?.url,
       },
       topTracks: topTracks,
-      aiRecommendations: aiGenres.genres,
+      aiRecommendations: aiGenres,
     };
 
     res.json(responseData);
