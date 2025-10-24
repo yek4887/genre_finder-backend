@@ -65,11 +65,25 @@ app.post('/api/recommend-genres', async (req, res) => {
   const userSpotifyApi = new SpotifyWebApi({ accessToken });
 
   try {
-    const artistSearch = await userSpotifyApi.searchArtists(query, { limit: 1 });
-    if (!artistSearch.body.artists || artistSearch.body.artists.items.length === 0) {
-      return res.status(404).json({ error: 'Artist not found' });
+    let artist: any = null; // 아티스트 정보를 담을 변수
+
+    // 1. 먼저 곡(Track)으로 검색
+    const trackSearch = await userSpotifyApi.searchTracks(query, { limit: 1 });
+    if (trackSearch.body.tracks && trackSearch.body.tracks.items.length > 0) {
+      // 곡을 찾았다면, 그 곡의 첫 번째 아티스트 정보를 사용
+      const trackArtistId = trackSearch.body.tracks.items[0].artists[0].id;
+      const artistResponse = await userSpotifyApi.getArtist(trackArtistId);
+      artist = artistResponse.body;
+    } else {
+      const artistSearch = await userSpotifyApi.searchArtists(query, { limit: 1 });
+      if (!artistSearch.body.artists || artistSearch.body.artists.items.length === 0) {
+        return res.status(404).json({ error: 'Artist not found' });
+      }
+      artist = artistSearch.body.artists.items[0];
     }
-    const artist = artistSearch.body.artists.items[0];
+    if (!artist) {
+      return res.status(404).json({ error: 'Artist or Track not found' });
+    }
     
     const prompt = `
       You are a world-class music curator. A user is searching for an artist named "${artist.name}".
