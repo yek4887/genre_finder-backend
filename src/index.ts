@@ -15,10 +15,8 @@ const corsOptions = {
   optionsSuccessStatus: 200
 };
 
-// ▼▼▼ 이 부분의 순서가 수정되었습니다 ▼▼▼
-app.use(cors(corsOptions)); // CORS 미들웨어를 가장 먼저 적용
-app.use(express.json());   // 그 다음에 JSON 파싱 미들웨어 적용
-// ▲▲▲ 이 부분의 순서가 수정되었습니다 ▲▲▲
+app.use(cors(corsOptions));
+app.use(express.json());
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -32,8 +30,6 @@ const spotifyApi = new SpotifyWebApi({
   clientSecret: process.env.SPOTIFY_CLIENT_SECRET,
   redirectUri: redirectUri
 });
-
-// ... (이하 모든 API 라우트 코드는 이전과 동일합니다) ...
 
 app.get('/api/login', (req, res) => {
   const scopes = ['playlist-modify-public', 'playlist-modify-private'];
@@ -124,13 +120,27 @@ app.post('/api/recommend-genres', async (req, res) => {
       aiGenres = [];
     }
 
+    // 대표 아티스트 이미지 조회 로직
+    const enrichedGenres = await Promise.all(
+      aiGenres.map(async (genre: any) => {
+        let imageUrl = '';
+        if (genre.artists && genre.artists.length > 0) {
+          const artistSearch = await userSpotifyApi.searchArtists(genre.artists[0].artistName, { limit: 1 });
+          if (artistSearch.body.artists && artistSearch.body.artists.items.length > 0) {
+            imageUrl = artistSearch.body.artists.items[0].images[0]?.url;
+          }
+        }
+        return { ...genre, imageUrl };
+      })
+    );
+
     const responseData = {
       searchedArtist: {
         name: artist.name,
         imageUrl: artist.images[0]?.url,
       },
       topTracks: topTracks,
-      aiRecommendations: aiGenres,
+      aiRecommendations: enrichedGenres,
     };
 
     res.json(responseData);
