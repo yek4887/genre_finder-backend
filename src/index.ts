@@ -5,232 +5,389 @@ import OpenAI from 'openai';
 import SpotifyWebApi from 'spotify-web-api-node';
 import 'dotenv/config';
 
-// @ts-ignore
+// @ts-ignore - 타입 선언 문제를 임시로 무시 (필요시 spotify-web-api-node-ts 설치 고려)
 import { TrackObjectFull } from 'spotify-web-api-node-ts/src/types/SpotifyObjects';
 
 const app = express();
 
-const allowedOrigins = ['https://genrefinder.xyz'];
+// --- CORS 설정 ---
+const allowedOrigins = ['https://genrefinder.xyz']; // 허용할 프론트엔드 주소
 const corsOptions: cors.CorsOptions = {
   origin: function (origin, callback) {
+    // 요청 출처(origin)가 허용 목록에 있거나 없는 경우(Postman 등) 허용
     if (!origin || allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
-      callback(new Error(`Origin ${origin} not allowed by CORS`));
+      callback(new Error(`Origin ${origin} not allowed by CORS`)); // 명확한 에러 메시지
     }
   },
-  optionsSuccessStatus: 200
+  optionsSuccessStatus: 200 // 일부 레거시 브라우저 호환성
 };
 
+// CORS 미들웨어를 가장 먼저 적용 (OPTIONS 요청 처리 위함)
 app.use(cors(corsOptions));
+// JSON 파싱 미들웨어 적용
 app.use(express.json());
 
+// --- OpenAI 설정 ---
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+// --- Spotify 설정 ---
 const isProduction = process.env.NODE_ENV === 'production';
-// !! 중요: 개발/운영 환경 Redirect URI 구분은 이제 Spotify 인스턴스 생성 시 처리
-const baseRedirectUri = '/api/callback'; // 경로만 정의
+const baseRedirectUri = '/api/callback'; // 기본 콜백 경로
 
+// 기본 Spotify API 인스턴스 (Client ID, Secret만 설정)
 const spotifyApi = new SpotifyWebApi({
   clientId: process.env.SPOTIFY_CLIENT_ID,
-  clientSecret: process.env.SPOTIFY_CLIENT_SECRET,
-  // redirectUri는 요청 시 동적으로 설정하거나, 기본 인스턴스에는 고정값 사용
-  // 여기서는 authorizationCodeGrant에 필요 없으므로 일단 생략 가능
+  clientSecret: process.env.SPOTIFY_CLIENT_SECRET
+  // redirectUri는 요청 시점에 동적으로 결정되므로 여기서는 설정하지 않음
 });
 
-// 로그인 라우트
-// 로그인 라우트 (수정된 부분)
+// --- API 라우트 ---
+
+// 1. 로그인 시작 라우트
 app.get('/api/login', (req, res) => {
-  const scopes = ['playlist-modify-public', 'playlist-modify-private', 'user-read-private'];
-  const state = 'state-key'; // CSRF 방지를 위한 상태값 (실제 앱에서는 랜덤 생성 권장)
-  const showDialog = true; // 항상 사용자에게 권한 동의를 묻도록 설정
+  const scopes = ['playlist-modify-public', 'playlist-modify-private', 'user-read-private']; // 필요한 권한 범위
+  const state = 'state-key'; // CSRF 공격 방지용 상태값 (실제 앱에서는 랜덤 생성 및 검증 필요)
+  const showDialog = true; // 항상 사용자에게 권한 동의 화면 표시
 
-  // createAuthorizeURL은 redirect_uri를 직접 인자로 받지 않습니다.
-  // scopes, state, showDialog 만 전달합니다.
-  const authorizeURL = spotifyApi.createAuthorizeURL(scopes, state, showDialog);
+  // 환경에 맞는 전체 Redirect URI 생성
+  const redirectUriFull = isProduction
+    ? `${process.env.BACKEND_URL}${baseRedirectUri}` // 운영 환경
+    : `http://127.0.0.1:8080${baseRedirectUri}`;   // 개발 환경
 
-  console.log("Redirecting to Spotify:", authorizeURL); // 디버깅 로그
-  res.redirect(authorizeURL);
+  // Spotify 인증 URL 생성 (scopes, state, showDialog 전달)
+  const authorizeURLBase = spotifyApi.createAuthorizeURL(scopes, state, showDialog);
+
+  // redirect_uri를 쿼리 파라미터로 명시적으로 추가
+  const authorizeURLWithRedirect = `${authorizeURLBase}&redirect_uri=${encodeURIComponent(redirectUriFull)}`;
+
+  console.log("Redirecting to Spotify for login:", authorizeURLWithRedirect); // 생성된 URL 로깅
+  res.redirect(authorizeURLWithRedirect); // Spotify 인증 페이지로 리디렉션
 });
-// 콜백 라우트
+
+// 2. Spotify 로그인 콜백 라우트
 app.get('/api/callback', async (req, res) => {
-  const { code } = req.query;
-  // 콜백 시에도 환경에 맞는 Redirect URI 사용
+  const { code, state, error } = req.query; // Spotify가 전달하는 파라미터 받기
+
+  // Spotify에서 에러를 전달한 경우 처리
+  if (error) {
+    console.error('Callback Error from Spotify:', error);
+    return res.status(400).send(`Error during Spotify authorization: ${error}`);
+  }
+  // Authorization Code가 없는 경우 처리
+  if (!code) {
+    console.error('Callback Error: No code received from Spotify.');
+    return res.status(400).send('Error: No authorization code received.');
+  }
+
+  // CSRF 방지를 위해 state 값 비교 (실제 앱에서는 저장된 state와 비교)
+  // if (state !== 'state-key') { return res.status(403).send('State mismatch'); }
+
+  // 환경에 맞는 Redirect URI 설정 (토큰 교환 시 필요)
   const redirectUriFull = isProduction
     ? `${process.env.BACKEND_URL}${baseRedirectUri}`
     : `http://127.0.0.1:8080${baseRedirectUri}`;
 
-  // 임시 Spotify 인스턴스 생성 (redirectUri 설정 포함)
-  const tempSpotifyApi = new SpotifyWebApi({
-    clientId: process.env.SPOTIFY_CLIENT_ID,
-    clientSecret: process.env.SPOTIFY_CLIENT_SECRET,
-    redirectUri: redirectUriFull // 여기에 정확한 redirectUri 설정
-  });
+  // 토큰 교환을 위해 Redirect URI를 임시로 설정
+  spotifyApi.setRedirectURI(redirectUriFull);
 
   try {
-    // 임시 인스턴스로 토큰 교환 요청
-    const data = await tempSpotifyApi.authorizationCodeGrant(code as string);
+    // Authorization Code를 Access Token 및 Refresh Token으로 교환
+    console.log("Attempting authorizationCodeGrant with code:", code?.toString().substring(0, 5) + "...");
+    const data = await spotifyApi.authorizationCodeGrant(code as string);
     const { access_token, refresh_token, expires_in } = data.body;
-    console.log("Received tokens:", { access_token: access_token?.substring(0,5), refresh_token: refresh_token?.substring(0,5), expires_in });
+    console.log("Successfully received tokens from Spotify:", { access_token: access_token?.substring(0,5), refresh_token: refresh_token?.substring(0,5), expires_in });
 
-    // 프론트엔드로 두 토큰과 만료 시간 전달
-    res.redirect(`https://genrefinder.xyz?access_token=${access_token}&refresh_token=${refresh_token}&expires_in=${expires_in}`);
+    // 토큰 교환 후 Redirect URI 초기화 (선택 사항)
+    spotifyApi.setRedirectURI('');
+
+    // 프론트엔드 주소로 토큰 정보를 쿼리 파라미터로 전달하며 리디렉션
+    const frontendRedirectUrl = `https://genrefinder.xyz?access_token=${access_token}&refresh_token=${refresh_token}&expires_in=${expires_in}`;
+    console.log("Redirecting to frontend with tokens..."); // 토큰 생략하고 로깅
+    res.redirect(frontendRedirectUrl);
+
   } catch (err: any) {
-    console.error('Callback Error:', err.message || err);
-    if(err.body) console.error('Spotify Error Body:', err.body);
-    res.status(err.statusCode || 400).send(`Error getting tokens: ${err.body?.error_description || err.message}`);
+    // 토큰 교환 실패 시 상세 로그 및 오류 응답
+    console.error('Callback Token Grant Error:', err.message || err);
+    if(err.body) console.error('Spotify Token Grant Error Body:', err.body);
+    // Redirect URI 초기화 (오류 발생 시에도)
+    spotifyApi.setRedirectURI('');
+    res.status(err.statusCode || 500).send(`Error getting tokens: ${err.body?.error_description || err.message}`);
   }
 });
 
-// --- Access Token 갱신 API 추가 ---
+// 3. Access Token 갱신 라우트
 app.post('/api/refresh_token', async (req, res) => {
     const { refreshToken } = req.body;
     if (!refreshToken) {
         return res.status(400).json({ error: 'Refresh token is required' });
     }
-    console.log("Received refresh token request:", refreshToken.substring(0,5));
+    console.log("Received refresh token request:", refreshToken.substring(0,5)+"...");
 
-    // Refresh Token을 설정하여 새로운 Spotify API 인스턴스 생성 (기본 인스턴스 재사용 가능하나 분리)
-    const refreshSpotifyApi = new SpotifyWebApi({
-        clientId: process.env.SPOTIFY_CLIENT_ID,
-        clientSecret: process.env.SPOTIFY_CLIENT_SECRET,
-        refreshToken: refreshToken
-    });
+    // Refresh Token 설정 (기본 인스턴스 사용)
+    spotifyApi.setRefreshToken(refreshToken);
 
     try {
-        const data = await refreshSpotifyApi.refreshAccessToken();
+        // Access Token 갱신 요청
+        const data = await spotifyApi.refreshAccessToken();
         const newAccessToken = data.body['access_token'];
         const newExpiresIn = data.body['expires_in'];
-        console.log("Refreshed access token:", { newAccessToken: newAccessToken?.substring(0,5), newExpiresIn });
+        console.log("Refreshed access token successfully:", { newAccessToken: newAccessToken?.substring(0,5), newExpiresIn });
 
+        // Refresh Token 초기화 (보안상 다음 요청 시 다시 설정하도록)
+        spotifyApi.setRefreshToken('');
+
+        // 새로운 Access Token과 만료 시간 응답
         res.json({
             accessToken: newAccessToken,
-            expiresIn: newExpiresIn
+            expiresIn: newExpiresIn // 클라이언트에서 만료 시간 계산하도록 초 단위 전달
         });
     } catch (err: any) {
+        // Refresh Token 초기화 (오류 발생 시에도)
+        spotifyApi.setRefreshToken('');
         console.error('Could not refresh access token', err.message || err);
         if(err.body) console.error('Spotify Refresh Error Body:', err.body);
         res.status(err.statusCode || 400).json({ error: `Could not refresh access token: ${err.body?.error_description || err.message}` });
     }
 });
-// --- Access Token 갱신 API 끝 ---
 
-
-// 장르 추천 라우트
+// 4. 장르 추천 라우트
 app.post('/api/recommend-genres', async (req, res) => {
   const { query, accessToken } = req.body;
-  // ... (이하 로직은 이전과 거의 동일, 단 userSpotifyApi 생성 부분 확인) ...
-   if (!query) return res.status(400).json({ error: 'Query is required' });
-   if (!accessToken) return res.status(401).json({ error: 'Access Token is required'});
-   console.log(`[${new Date().toISOString()}] Received recommend-genres request for query: ${query}`);
+  console.log(`[${new Date().toISOString()}] Received recommend-genres request for query: ${query}`);
 
-   // 요청마다 새로운 인스턴스를 생성하거나, 토큰을 설정해야 함
-   const userSpotifyApi = new SpotifyWebApi();
-   userSpotifyApi.setAccessToken(accessToken); // Access Token 설정
+  // 입력값 검증
+  if (!query) { console.warn("Query is missing"); return res.status(400).json({ error: 'Query is required' }); }
+  if (!accessToken) { console.warn("Access Token is missing"); return res.status(401).json({ error: 'Access Token is required'}); }
 
-   try {
-     let artist: any = null;
-     // ... (Spotify 검색 및 OpenAI 호출 로직 동일) ...
-     let searchStep = 'Initial'; // 디버깅용
+  // 요청별 Spotify API 인스턴스 사용 또는 토큰 설정
+  const userSpotifyApi = new SpotifyWebApi(); // 새 인스턴스 생성
+  userSpotifyApi.setAccessToken(accessToken); // 전달받은 Access Token 설정
 
-      try {
-        searchStep = 'Searching tracks';
-        console.log(`Searching tracks for: ${query}`);
-        const trackSearch = await userSpotifyApi.searchTracks(query, { limit: 1 });
-        if (trackSearch.body.tracks && trackSearch.body.tracks.items.length > 0) {
-          searchStep = 'Getting artist from track';
-          const trackArtistId = trackSearch.body.tracks.items[0].artists[0].id;
-          console.log(`Found track, getting artist ID: ${trackArtistId}`);
-          const artistResponse = await userSpotifyApi.getArtist(trackArtistId);
-          artist = artistResponse.body;
-        } else {
-          searchStep = 'Searching artists';
-          console.log(`Track not found, searching artists for: ${query}`);
-          const artistSearch = await userSpotifyApi.searchArtists(query, { limit: 1 });
-          if (artistSearch.body.artists && artistSearch.body.artists.items.length > 0) {
-            artist = artistSearch.body.artists.items[0];
-          }
+  try {
+    let artist: any = null;
+    let searchStep = 'Initial'; // 디버깅용
+
+    // 아티스트/트랙 검색 (오류 처리 강화)
+    try {
+      searchStep = 'Searching tracks';
+      console.log(`Searching tracks for: ${query}`);
+      const trackSearch = await userSpotifyApi.searchTracks(query, { limit: 1 });
+      if (trackSearch.body.tracks && trackSearch.body.tracks.items.length > 0) {
+        searchStep = 'Getting artist from track';
+        const trackArtistId = trackSearch.body.tracks.items[0].artists[0].id;
+        console.log(`Found track, getting artist ID: ${trackArtistId}`);
+        const artistResponse = await userSpotifyApi.getArtist(trackArtistId);
+        artist = artistResponse.body;
+      } else {
+        searchStep = 'Searching artists';
+        console.log(`Track not found, searching artists for: ${query}`);
+        const artistSearch = await userSpotifyApi.searchArtists(query, { limit: 1 });
+        if (artistSearch.body.artists && artistSearch.body.artists.items.length > 0) {
+          artist = artistSearch.body.artists.items[0];
         }
-      } catch (spotifySearchError: any) {
-          console.error(`Error during Spotify search (${searchStep}):`, spotifySearchError.message || spotifySearchError);
-          if(spotifySearchError.body) console.error('Spotify Search Error Body:', spotifySearchError.body);
-          // 401 오류는 토큰 만료 가능성을 의미하므로 클라이언트에게 알림
-          if (spotifySearchError.statusCode === 401) {
-              return res.status(401).json({ error: 'Spotify access token might be expired. Please try refreshing.' });
-          }
-          return res.status(spotifySearchError.statusCode || 503).json({ error: `Failed to search Spotify: ${spotifySearchError.body?.error?.message || spotifySearchError.message}` });
       }
+    } catch (spotifySearchError: any) {
+        console.error(`Error during Spotify search (${searchStep}):`, spotifySearchError.message || spotifySearchError);
+        if(spotifySearchError.body) console.error('Spotify Search Error Body:', spotifySearchError.body);
+        if (spotifySearchError.statusCode === 401) {
+            return res.status(401).json({ error: 'Spotify access token might be expired. Please try refreshing.' });
+        }
+        return res.status(spotifySearchError.statusCode || 503).json({ error: `Failed to search Spotify: ${spotifySearchError.body?.error?.message || spotifySearchError.message}` });
+    }
 
+    // 아티스트 확인
+    if (!artist) {
+      console.log(`Artist or Track not found for query: ${query}`);
+      return res.status(404).json({ error: 'Artist or Track not found' });
+    }
+    console.log(`Found artist: ${artist.name}`);
 
-      if (!artist) { /* ... 아티스트 없음 처리 동일 ... */ }
-      console.log(`Found artist: ${artist.name}`);
+    // 대표곡 조회 (오류 처리 강화)
+    let topTracks: any[] = [];
+    try {
+        console.log(`Getting top tracks for artist ID: ${artist.id}`);
+        const topTracksResponse = await userSpotifyApi.getArtistTopTracks(artist.id, 'US'); // US 마켓 기준
+        topTracks = topTracksResponse.body.tracks.slice(0, 5).map(track => ({
+            name: track.name,
+            url: track.external_urls.spotify,
+            preview_url: track.preview_url
+        }));
+    } catch (topTrackError: any) {
+        console.error(`Error getting top tracks for ${artist.name}:`, topTrackError.message || topTrackError);
+        if(topTrackError.body) console.error('Spotify Top Tracks Error Body:', topTrackError.body);
+        // 대표곡 조회 실패는 치명적이지 않으므로 빈 배열로 계속 진행
+    }
 
+    // OpenAI 프롬프트 생성 (기존 장르 정보 안전하게 처리)
+    const existingGenres = (artist.genres && artist.genres.length > 0)
+      ? `Do not recommend the genre "${artist.genres.join(', ')}".`
+      : '';
 
-      let topTracks: any[] = [];
-      try { /* ... Top Tracks 조회 동일 (오류 시 빈 배열) ... */ }
-      catch (topTrackError) { /* ... */ }
+    const prompt = `
+      You are a world-class music curator with deep knowledge of music from various countries including Korea, Japan, the UK, and the US.
+      A user is searching for music related to "${artist.name}".
+      Based on this artist's style, recommend 3 unique and interesting music genres.
+      For each genre, provide a short, engaging description and 3 other representative artists.
+      ${existingGenres}
+      Do not recommend the artist "${artist.name}".
+      Crucially, if relevant to the genre, try to include a diverse mix of artists from different countries like Korea, Japan, the UK, or the US.
+      Provide the response strictly in JSON format like this, including spotifyTrackIds for each recommended artist's top track:
+      {
+        "genres": [
+          { "name": "Genre Name", "description": "...", "artists": [{"artistName": "Artist A (Country if known)", "spotifyTrackId": "..."}, ...] },
+          ...
+        ]
+      }
+    `;
 
-      const existingGenres = (artist.genres && artist.genres.length > 0) ? `...` : '';
-      const prompt = `...`; // (프롬프트 동일)
+    // OpenAI API 호출 (오류 처리 강화)
+    let aiGenres: any[] = []; // 기본값 빈 배열
+    try {
+        console.log(`Sending request to OpenAI for artist: ${artist.name}`);
+        const completion = await openai.chat.completions.create({
+          model: "gpt-3.5-turbo",
+          messages: [{ role: "user", content: prompt }],
+          response_format: { type: "json_object" },
+          timeout: 20000 // 20초 타임아웃 설정 (선택 사항)
+        });
 
-      let aiGenres: any[] = []; // 기본값 빈 배열
-      try { /* ... OpenAI 호출 및 파싱 동일 (오류 시 빈 배열) ... */ }
-      catch (openaiError) { /* ... */ }
+        const aiResponse = completion.choices[0].message.content;
+        if (aiResponse) {
+            try {
+                aiGenres = JSON.parse(aiResponse).genres || [];
+                 console.log(`Received AI genres for ${artist.name}`);
+            } catch (parseError) {
+                console.error("Failed to parse AI response JSON:", parseError, "Response was:", aiResponse);
+            }
+        } else {
+            console.warn(`OpenAI returned empty content for ${artist.name}`);
+        }
+    } catch (openaiError: any) {
+        console.error(`Error calling OpenAI for ${artist.name}:`, openaiError.message || openaiError);
+        if (openaiError.response) console.error("OpenAI Error Response:", openaiError.response.data);
+        // OpenAI 오류 시에도 서비스 중단 방지, 빈 배열 반환
+    }
 
-      let enrichedGenres: any[] = [];
-      try { /* ... 이미지 조회 로직 동일 (개별 오류 처리) ... */ }
-      catch (enrichError) { /* ... */ }
+    // AI 추천 아티스트 이미지 조회 (오류 처리 강화)
+    let enrichedGenres: any[] = [];
+    try {
+        console.log(`Fetching images for AI recommended artists...`);
+        enrichedGenres = await Promise.all(
+          (aiGenres || []).map(async (genre: any) => {
+            let imageUrl: string | null = null;
+            try {
+              if (genre && genre.artists && genre.artists.length > 0 && genre.artists[0].artistName) {
+                // 주의: Access Token이 설정된 userSpotifyApi 사용
+                const artistSearch = await userSpotifyApi.searchArtists(genre.artists[0].artistName, { limit: 1 });
+                if (artistSearch.body.artists && artistSearch.body.artists.items.length > 0) {
+                  imageUrl = artistSearch.body.artists.items[0].images[0]?.url || null;
+                }
+              }
+            } catch (imageError: any) {
+                console.error(`Failed to fetch image for ${genre.artists[0]?.artistName}:`, imageError.message || imageError);
+                 if(imageError.body) console.error('Spotify Image Search Error Body:', imageError.body);
+                 // 개별 이미지 오류는 무시하고 계속 진행
+            }
+            return { ...genre, imageUrl };
+          })
+        );
+         console.log(`Finished fetching images.`);
+    } catch (enrichError) {
+        // Promise.all 자체에서 발생할 수 있는 예외 처리 (거의 발생 안 함)
+        console.error("Unexpected error during genre enrichment (image fetching):", enrichError);
+        enrichedGenres = aiGenres; // 이미지 조회가 실패하면 원본 AI 결과 사용
+    }
 
-      const responseData = { /* ... 응답 데이터 구성 동일 ... */ };
-      res.json(responseData);
+    // 최종 응답 데이터 구성
+    const responseData = {
+      searchedArtist: { name: artist.name, imageUrl: artist.images[0]?.url },
+      topTracks: topTracks,
+      aiRecommendations: enrichedGenres,
+    };
 
-   } catch (error: any) { // userSpotifyApi 사용 중 발생하는 모든 에러 처리
-     console.error(`Unhandled error processing recommend-genres for query ${query}:`, error.message || error);
-     if(error.body) console.error('Spotify General Error Body:', error.body);
-      // 401 오류는 토큰 만료 가능성을 의미
-     if (error.statusCode === 401) {
-         return res.status(401).json({ error: 'Spotify access token might be expired. Please try refreshing.' });
-     }
-     res.status(error.statusCode || 500).json({ error: `An unexpected error occurred: ${error.body?.error?.message || error.message}` });
-   }
+    console.log(`Successfully processed recommend-genres request for query: ${query}`);
+    res.json(responseData);
+
+  } catch (error: any) {
+     // 핸들러 내에서 예상치 못한 모든 오류 처리
+    console.error(`Unhandled error in recommend-genres for query ${query}:`, error.message || error);
+    if(error.body) console.error('Spotify General Error Body:', error.body);
+    // 401 오류는 토큰 만료 가능성
+    if (error.statusCode === 401) {
+        return res.status(401).json({ error: 'Spotify access token might be expired. Please try refreshing.' });
+    }
+    res.status(error.statusCode || 500).json({ error: `An unexpected error occurred: ${error.body?.error?.message || error.message}` });
+  }
 });
 
-
-// 플레이리스트 저장 라우트
+// 5. 플레이리스트 저장 라우트
 app.post('/api/save-playlist', async (req, res) => {
     const { accessToken, trackIds, artistName } = req.body;
-    // ... (입력값 검증 동일) ...
-    if (!accessToken || !trackIds || !artistName) { /* ... */ }
+    // 입력값 검증
+    if (!accessToken || !trackIds || !artistName) {
+      console.warn('Save Playlist: Missing required parameters.');
+      return res.status(400).json({ error: 'Missing required parameters.' });
+    }
     console.log(`[${new Date().toISOString()}] Received save-playlist request for artist: ${artistName}`);
 
-    // 요청마다 새로운 인스턴스 또는 토큰 설정
+    // 요청별 Spotify API 인스턴스 사용 또는 토큰 설정
     const userSpotifyApi = new SpotifyWebApi();
     userSpotifyApi.setAccessToken(accessToken);
 
     try {
-        const meResponse = await userSpotifyApi.getMe();
-        // ... (플레이리스트 생성 및 트랙 추가 로직 동일) ...
+        // 플레이리스트 이름 생성
         const playlistName = `${artistName} inspired by Genre Finder`;
-        const playlistResponse = await userSpotifyApi.createPlaylist(playlistName, { /* ... */ });
+        // 플레이리스트 생성 요청
+        console.log(`Creating playlist: ${playlistName}`);
+        const playlistResponse = await userSpotifyApi.createPlaylist(playlistName, {
+            public: false, // 비공개
+            description: `AI recommended tracks based on ${artistName}. Created by Genre Finder.`
+        });
         const playlistId = playlistResponse.body.id;
         const playlistUrl = playlistResponse.body.external_urls.spotify;
+        console.log(`Playlist created with ID: ${playlistId}`);
 
-        if (Array.isArray(trackIds) && trackIds.length > 0) { /* ... 트랙 추가 로직 동일 ... */ }
-        else { /* ... */ }
+        // 트랙 ID 목록 유효성 검사 및 URI 변환
+        if (Array.isArray(trackIds) && trackIds.length > 0) {
+            const spotifyTrackUris = trackIds
+                .filter(id => typeof id === 'string' && id.trim() !== '') // 유효한 ID 문자열만 필터링
+                .map((id: string) => `spotify:track:${id}`); // URI 형식으로 변환
 
-        console.log(`Playlist created successfully for ${artistName}. URL: ${playlistUrl}`);
+            if (spotifyTrackUris.length > 0) {
+                 // 플레이리스트에 트랙 추가 (API는 최대 100개씩 가능, 필요시 분할)
+                 console.log(`Adding ${spotifyTrackUris.length} tracks to playlist ${playlistId}`);
+                 // Spotify API는 한 번에 100개까지만 추가 가능하므로, 필요시 청크로 나눠야 함
+                 const chunkSize = 100;
+                 for (let i = 0; i < spotifyTrackUris.length; i += chunkSize) {
+                     const chunk = spotifyTrackUris.slice(i, i + chunkSize);
+                     await userSpotifyApi.addTracksToPlaylist(playlistId, chunk);
+                     console.log(`Added chunk of ${chunk.length} tracks.`);
+                 }
+            } else {
+                console.warn("No valid track IDs provided to add to the playlist.");
+            }
+        } else {
+             console.warn("trackIds parameter is not a valid array or is empty.");
+        }
+
+        console.log(`Playlist creation complete for ${artistName}. URL: ${playlistUrl}`);
+        // 성공 응답
         res.status(200).json({ message: 'Playlist created successfully!', playlistUrl: playlistUrl });
 
-    } catch (err: any) { // Spotify API 오류 처리 강화
-        console.error(`Failed to create playlist for ${artistName}:`, err.message || err);
+    } catch (err: any) {
+        // 플레이리스트 생성/추가 실패 시 상세 오류 처리
+        console.error(`Failed to save playlist for ${artistName}:`, err.message || err);
         if (err.body && err.body.error) {
-            console.error('Spotify API Error during playlist creation:', err.body.error);
+            console.error('Spotify API Error during playlist save:', err.body.error);
             // 401 오류는 토큰 만료 가능성
             if (err.statusCode === 401) {
                 return res.status(401).json({ error: 'Spotify access token might be expired. Please try refreshing.' });
             }
             return res.status(err.statusCode || 500).json({ error: `Spotify API Error: ${err.body.error.message}` });
         }
+        // 일반적인 서버 오류 응답
         res.status(500).json({ error: 'Internal server error during playlist creation.' });
     }
 });
