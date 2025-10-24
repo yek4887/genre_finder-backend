@@ -184,22 +184,29 @@ app.post('/api/recommend-genres', async (req, res) => {
         ? `Do not recommend the genre "${artist.genres.join(', ')}".`
         : '';
 
+       // server/src/index.ts 파일에서 prompt 부분을 찾아 아래 내용으로 교체
+
     const prompt = `
-      You are a world-class music curator with deep knowledge of music from various countries including Korea, Japan, the UK, and the US.
-      A user is searching for music related to "${artist.name}".
-      Based on this artist's style, recommend 3 unique and interesting music genres.
-      For each genre, provide a short, engaging description and 3 other representative artists.
-      ${existingGenres}
-      Do not recommend the artist "${artist.name}".
-      Crucially, if relevant to the genre, try to include a diverse mix of artists from different countries like Korea, Japan, the UK, or the US.
-      Provide the response strictly in JSON format like this, including spotifyTrackIds for each recommended artist's top track:
-      {
-        "genres": [
-          { "name": "Genre Name", "description": "...", "artists": [{"artistName": "Artist A (Country if known)", "spotifyTrackId": "..."}, ...] },
-          ...
-        ]
-      }
-    `;
+    You are a world-class music curator with deep knowledge of music from various countries including Korea, Japan, the UK, and the US.
+    A user is searching for music related to "${artist.name}".
+    Based on this artist's style, recommend 3 unique and interesting music genres.
+    For each genre, provide a short, engaging description and up to 6 other representative artists.
+    ${existingGenres}
+    Do not recommend the artist "${artist.name}".
+    Crucially, if relevant to the genre, try to include a diverse mix of artists from different countries like Korea, Japan, the UK, or the US.
+    IMPORTANT: Do NOT include country indicators like (US), (UK), (KR) next to the artist names. Just list the names.
+    Provide the response strictly in JSON format like this, including spotifyTrackIds for each recommended artist's top track:
+    {
+      "genres": [
+        {
+          "name": "Genre Name",
+          "description": "...",
+          "artists": [{"artistName": "Artist A", "spotifyTrackId": "..."}, ...] // Up to 6 artists
+        },
+        ...
+      ]
+    }
+  `;
 
     let aiGenres: any[] = [];
     try {
