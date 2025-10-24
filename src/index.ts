@@ -112,4 +112,58 @@ app.post('/api/recommend-genres', async (req, res) => {
                 {"artistName": "Perturbator", "spotifyTrackId": "063oN03t0kG3Jp8UNa3o8M"}
             ]},
             { "name": "Dream Pop", "description": "Characterized by its ethereal soundscapes and pop melodies.", "artists": [
-                {"artistName": "Beach House",
+                {"artistName": "Beach House", "spotifyTrackId": "322sQNpYo2t1732s7dF4l8"},
+                {"artistName": "Cocteau Twins", "spotifyTrackId": "33Zb2B0Q30gV5lH6I9slsM"},
+                {"artistName": "Cigarettes After Sex", "spotifyTrackId": "73T16nK9b3ZU32hXM9aEa2"}
+            ]}
+        ]
+    };
+
+    const responseData = {
+      searchedArtist: {
+        name: artist.name,
+        imageUrl: artist.images[0]?.url,
+      },
+      topTracks: topTracks,
+      aiRecommendations: aiGenres.genres,
+    };
+
+    res.json(responseData);
+
+  } catch (error) {
+    console.error('Error processing request:', error);
+    res.status(500).json({ error: 'Failed to process request.' });
+  }
+});
+
+app.post('/api/save-playlist', async (req, res) => {
+    const { accessToken, trackIds, artistName } = req.body;
+    if (!accessToken || !trackIds || !artistName) {
+        return res.status(400).json({ error: 'Missing required parameters.' });
+    }
+
+    const userSpotifyApi = new SpotifyWebApi({ accessToken });
+
+    try {
+        const playlistName = `${artistName} inspired by Genre Finder`;
+        const playlist = await userSpotifyApi.createPlaylist(playlistName, {
+            public: false,
+            description: `AI recommended tracks based on ${artistName}. Created by Genre Finder.`
+        });
+        const playlistId = playlist.body.id;
+
+        const spotifyTrackUris = trackIds.map((id: string) => `spotify:track:${id}`);
+        await userSpotifyApi.addTracksToPlaylist(playlistId, spotifyTrackUris);
+
+        res.status(200).json({ message: 'Playlist created successfully!', playlistUrl: playlist.body.external_urls.spotify });
+
+    } catch (err) {
+        console.error('Failed to create playlist', err);
+        res.status(500).json({ error: 'Failed to create playlist.' });
+    }
+});
+
+const PORT = 8080;
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});
