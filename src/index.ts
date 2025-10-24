@@ -12,18 +12,27 @@ const app = express();
 app.use(express.json());
 
 const corsOptions = {
-  origin: 'https://genrefinder.xyz', // Vercel 프론트엔드 주소
+  origin: 'https://genrefinder.xyz',
   optionsSuccessStatus: 200
 };
 app.use(cors(corsOptions));
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+
+// ▼▼▼ 이 부분이 수정되었습니다 ▼▼▼
+const isProduction = process.env.NODE_ENV === 'production';
+const redirectUri = isProduction
+  ? `${process.env.BACKEND_URL}/api/callback` // 실제 서버 환경일 때
+  : 'http://127.0.0.1:8080/api/callback';   // 개발 환경일 때
+
 const spotifyApi = new SpotifyWebApi({
   clientId: process.env.SPOTIFY_CLIENT_ID,
   clientSecret: process.env.SPOTIFY_CLIENT_SECRET,
-  redirectUri: 'http://127.0.0.1:8080/api/callback' // localhost를 127.0.0.1로 변경
+  redirectUri: redirectUri // 동적으로 설정된 redirectUri 사용
 });
+// ▲▲▲ 이 부분이 수정되었습니다 ▲▲▲
+
 
 app.get('/api/login', (req, res) => {
   const scopes = ['playlist-modify-public', 'playlist-modify-private'];
@@ -37,12 +46,16 @@ app.get('/api/callback', async (req, res) => {
     const data = await spotifyApi.authorizationCodeGrant(code as string);
     const { access_token, refresh_token } = data.body;
     
-    res.redirect(`https://genrefinder.xyz/callback?access_token=${access_token}&refresh_token=${refresh_token}`);
+    // 이제 프론트엔드 주소로 안전하게 리디렉션합니다.
+    res.redirect(`https://genrefinder.xyz?access_token=${access_token}&refresh_token=${refresh_token}`);
 
   } catch (err) {
+    console.error('Callback Error:', err);
     res.status(400).send('Error getting tokens');
   }
 });
+
+// ... (이하 모든 코드는 이전과 동일합니다) ...
 
 app.post('/api/recommend-genres', async (req, res) => {
   const { query, accessToken } = req.body;
@@ -79,9 +92,7 @@ app.post('/api/recommend-genres', async (req, res) => {
         ]
       }
     `;
-
-    // 이 부분은 실제 OpenAI 호출 및 Spotify 검색 로직으로 대체되어야 합니다.
-    // 현재는 예시 응답을 반환합니다.
+    
     const aiGenres = {
         "genres": [
             { "name": "Synthwave", "description": "A genre of electronic music influenced by 1980s film soundtracks and video games.", "artists": [
@@ -122,22 +133,17 @@ app.post('/api/save-playlist', async (req, res) => {
     const userSpotifyApi = new SpotifyWebApi({ accessToken });
 
     try {
-        // ▼▼▼ 이 부분이 수정되었습니다 ▼▼▼
         const playlistName = `${artistName} inspired by Genre Finder`;
-
-        // 1. 플레이리스트 생성: 첫 인자로 '이름', 두 번째 인자로 '옵션'을 전달합니다.
         const playlist = await userSpotifyApi.createPlaylist(playlistName, {
             public: false,
             description: `AI recommended tracks based on ${artistName}. Created by Genre Finder.`
         });
         const playlistId = playlist.body.id;
 
-        // 2. 플레이리스트에 트랙 추가
         const spotifyTrackUris = trackIds.map((id: string) => `spotify:track:${id}`);
         await userSpotifyApi.addTracksToPlaylist(playlistId, spotifyTrackUris);
 
         res.status(200).json({ message: 'Playlist created successfully!', playlistUrl: playlist.body.external_urls.spotify });
-        // ▲▲▲ 이 부분이 수정되었습니다 ▲▲▲
 
     } catch (err) {
         console.error('Failed to create playlist', err);
